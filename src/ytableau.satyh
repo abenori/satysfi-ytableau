@@ -1,12 +1,25 @@
 @require: list
 @require: color
 @require: base/list-ext
+@require: base/int
+@require: base/length
+@require: base/float
 
-module Ytabulau : sig
-
+module Ytabuleau : sig
+  val \ydiagram : [int list] math-cmd
 end = struct
 
-type tabulau-cell = NoCell of math | Cell of math
+type tableau-cell = 
+  | NoYoungCell of math
+  | YoungCell of math
+
+let empty-math = text-in-math MathOrd (fun ctx -> inline-nil)
+
+let display-line-draw-message (fromx,fromy) (tox,toy) = 
+  let len-to-str l = (Float.to-string (Length.to-float l)) ^ `pt` in
+  display-message (`draw line from (` ^ 
+    (len-to-str fromx) ^ `,` ^ (len-to-str fromy) ^ `) to (` ^ 
+    (len-to-str tox) ^ `,` ^ (len-to-str toy) ^ `)`)
 
 % ある行と次の行の（または列の）リストを渡すとその間の線を引く場所を返す
 % 戻り値は[(0,1); (2,4);]みたいなリスト．（これは一番目の箱と，3,4番目の箱のところに線を引くという意味．）
@@ -16,36 +29,44 @@ let get-line-pos lst1 lst2 =
     | None -> false
     | Some(l) -> (
       match l with
-      | NoCell(m) -> false
-      | Cell(m) -> true
+      | NoYoungCell(m) -> false
+      | YoungCell(m) -> true
     )
   in
   let-rec remove-last l =
     match l with
     | [] -> []
-    | h :: t -> h :: (remove-last t)
+    | h :: t -> (
+      match t with 
+      | [] -> []
+      | _ :: _  -> h :: (remove-last t)
+    )
   in
   let-rec aux a b =
     let na = List.length a in
     let nb = List.length b in
-    let (n,add,preva,prevb) = 
-      if na < nb then
-        (nb,check-last b, a, remove-last b)
-      else if na > nb then
-        (na,check-last a, remove-last a, b)
-      else
-        (na,check-last a || check-last b,remove-last a,remove-last b)
-    in
-
-    let prev = aux preva prevb in
-    if add then prev
+    if na == 0 && nb == 0 then []
     else
-      match List.last prev with
-      | None -> [(n - 1,n)]
-      | Some((a,b)) -> (
-        if b == n - 1 then List.append (remove-last prev) [(a,n)]
-        else List.append prev [(a,n)]
-      )
+      %let () = display-message (`na = ` ^ (Int.to-string na) ^ `, nb = ` ^ (Int.to-string nb)) in
+      let (n,add,preva,prevb) = 
+        if na < nb then
+          (nb,check-last b, a, remove-last b)
+        else if na > nb then
+          (na,check-last a, remove-last a, b)
+        else
+          (na,check-last a || check-last b,remove-last a,remove-last b)
+      in
+      %let () = display-message (`nra = ` ^ (Int.to-string (List.length (remove-last a))) ^ `, nrb = ` ^ (Int.to-string (List.length (remove-last b)))) in
+
+      let prev = aux preva prevb in
+      if add then prev
+      else
+        match List.last prev with
+        | None -> [(n - 1,n)]
+        | Some((a,b)) -> (
+          if b == n - 1 then List.append (remove-last prev) [(a,n)]
+          else List.append prev [(a,n)]
+        )
   in
   aux lst1 lst2
 
@@ -55,9 +76,11 @@ let draw-tableau ctx lst =
   let padding = 5pt in
   let pds = (padding,padding,padding,padding) in
   let cell-lst = List.map (List.map (fun c -> (
-    match c with 
-    | NoCell -> EmptyCell
-    | Cell(m) -> NormalCell(pds,(embed-math ctx m))
+    NormalCell(pds,(embed-math ctx (
+      match c with 
+      | NoYoungCell(m) -> m
+      | YoungCell(m) -> m
+    )))
   ))) lst in
   let draw-lines xlst ylst =
     % 横方向の描画
@@ -70,18 +93,33 @@ let draw-tableau ctx lst =
       let cury = match List.head ylst with
         | None -> (
           let () = abort-with-message `cury in draw-lines (Ytableau) is not defined, it should be a bug` in
-          0
+          0pt
         ) 
         | Some(y) -> y
       in
       let line-pos = get-line-pos prevline curline in
       let gr = List.fold-left (fun grlst (lst,len) -> (
-        let xst = List.nth xlst lst in
-        let xen = List.nth xlst len in
-        Liet.append gr [(stroke line-width line-color (
-            start-path (xst,y) |> line-to (xen,y) |> terminate-path
+        let xst = 
+          match List.nth lst xlst with
+          | None -> (
+            let () = display-message (`can't get lst-th entry (lst = ` ^ (Int.to-string lst) ^ `) of xlst in h-lines, draw-lines (Ytabluaux), it should be a bug`) in
+            0pt
+          )
+          | Some(a) -> a
+        in
+        let xen = 
+          match List.nth len xlst with
+          | None -> (
+            let () = display-message (`can't get len-th entry (len = ` ^ (Int.to-string len) ^ `) of xlst in h-lines, draw-lines (Ytabluaux), it should be a bug`) in
+            0pt
+          )
+          | Some(a) -> a
+        in
+        let () = display-line-draw-message (xst,cury) (xen,cury) in
+        List.append grlst [(stroke line-width line-color (
+            start-path (xst,cury) |> line-to (xen,cury) |> terminate-path
           ))]
-      )) in
+      )) [] line-pos in
       match List.tail lst with
       | None -> gr
       | Some(t) -> (
@@ -93,7 +131,68 @@ let draw-tableau ctx lst =
         | Some(ytlst) -> List.append gr (h-lines xlst ytlst t curline)
       )
     in
+    
+    let h-gr = h-lines xlst ylst lst [] in
+
+    let v-line xlst ya yb line =
+      let-rec aux xl cells prevcell =
+        let (curcell,nextcells,next) =
+          match cells with
+          | [] -> (NoYoungCell(empty-math),[],false)
+          | c :: n -> (c,n,true)
+        in
+        let (curx,nextx) = match xlst with
+          | [] -> (
+            let () = abort-with-message `xlst in v-line, draw-lines (Ytabuleau) is empty, it should be a bug` in
+            (0pt,[])
+          )
+          | a :: b -> (a,b)
+        in
+        let is-non-empty-cell c =
+          match c with
+          | NoYoungCell(_) -> false
+          | YoungCell(_) -> true
+        in
+        let () = display-line-draw-message (curx,ya) (curx,yb) in
+        let gr = 
+          if (is-non-empty-cell prevcell) || (is-non-empty-cell curcell) then
+            [(stroke line-width line-color (
+              start-path (curx,ya) |> line-to (curx,yb) |> terminate-path
+            ))]
+          else []
+        in
+        if next then List.append gr (aux nextx nextcells curcell) 
+        else gr
+      in
+      aux xlst line (NoYoungCell(empty-math))
+    in
+
+    let-rec v-lines xlst ylst lst prevy =
+      match lst with
+      | [] -> []
+      | l :: rl -> (
+        let (cury,ry) = 
+          match ylst with
+          | [] -> (
+            let () = abort-with-message `ylst is empty in v-lines, in draw-lines (Ytableau), it should be a bug` in
+            (0pt,[0pt])
+          )
+          | y :: r -> (y,r)
+        in
+        List.append (v-line xlst prevy cury l) (v-lines xlst ry rl cury)
+      )
+    in
+    let v-gr = 
+      match ylst with
+      | [] -> []
+      | y :: ry -> v-lines xlst ry lst y
+    in
+    List.append h-gr v-gr
   in
   tabular cell-lst draw-lines
-end
 
+let-math \ydiagram lst =
+  let clst = List.map (fun n -> List.repeat n (YoungCell(empty-math))) lst in
+  text-in-math MathOrd (fun ctx -> draw-tableau ctx clst)
+
+end
