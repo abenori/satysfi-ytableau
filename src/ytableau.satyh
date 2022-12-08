@@ -1,0 +1,99 @@
+@require: list
+@require: color
+@require: base/list-ext
+
+module Ytabulau : sig
+
+end = struct
+
+type tabulau-cell = NoCell of math | Cell of math
+
+% ある行と次の行の（または列の）リストを渡すとその間の線を引く場所を返す
+% 戻り値は[(0,1); (2,4);]みたいなリスト．（これは一番目の箱と，3,4番目の箱のところに線を引くという意味．）
+let get-line-pos lst1 lst2 =
+  let check-last lst =
+    match List.last lst with
+    | None -> false
+    | Some(l) -> (
+      match l with
+      | NoCell(m) -> false
+      | Cell(m) -> true
+    )
+  in
+  let-rec remove-last l =
+    match l with
+    | [] -> []
+    | h :: t -> h :: (remove-last t)
+  in
+  let-rec aux a b =
+    let na = List.length a in
+    let nb = List.length b in
+    let (n,add,preva,prevb) = 
+      if na < nb then
+        (nb,check-last b, a, remove-last b)
+      else if na > nb then
+        (na,check-last a, remove-last a, b)
+      else
+        (na,check-last a || check-last b,remove-last a,remove-last b)
+    in
+
+    let prev = aux preva prevb in
+    if add then prev
+    else
+      match List.last prev with
+      | None -> [(n - 1,n)]
+      | Some((a,b)) -> (
+        if b == n - 1 then List.append (remove-last prev) [(a,n)]
+        else List.append prev [(a,n)]
+      )
+  in
+  aux lst1 lst2
+
+let draw-tableau ctx lst =
+  let line-color = Color.black in
+  let line-width = 1pt in
+  let padding = 5pt in
+  let pds = (padding,padding,padding,padding) in
+  let cell-lst = List.map (List.map (fun c -> (
+    match c with 
+    | NoCell -> EmptyCell
+    | Cell(m) -> NormalCell(pds,(embed-math ctx m))
+  ))) lst in
+  let draw-lines xlst ylst =
+    % 横方向の描画
+    let-rec h-lines xlst ylst lst prevline =
+      let curline = 
+        match List.head lst with
+        | None -> []
+        | Some(l) -> l
+      in
+      let cury = match List.head ylst with
+        | None -> (
+          let () = abort-with-message `cury in draw-lines (Ytableau) is not defined, it should be a bug` in
+          0
+        ) 
+        | Some(y) -> y
+      in
+      let line-pos = get-line-pos prevline curline in
+      let gr = List.fold-left (fun grlst (lst,len) -> (
+        let xst = List.nth xlst lst in
+        let xen = List.nth xlst len in
+        Liet.append gr [(stroke line-width line-color (
+            start-path (xst,y) |> line-to (xen,y) |> terminate-path
+          ))]
+      )) in
+      match List.tail lst with
+      | None -> gr
+      | Some(t) -> (
+        match List.tail ylst with 
+        | None -> (
+          let () = abort-with-message `ylst is empty in draw-lines (Ytableau), it should be a bug` in
+          []
+        )
+        | Some(ytlst) -> List.append gr (h-lines xlst ytlst t curline)
+      )
+    in
+  in
+  tabular cell-lst draw-lines
+end
+

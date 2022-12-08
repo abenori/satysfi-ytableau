@@ -1,0 +1,13 @@
+@require: stdjareport
+@require: ytableau/ytableau
+
+% Document-local function definition
+
+document (|
+  title = {ytableau};
+  author = {Noriyuki Abe};
+|) '<
+  +p {
+    Under construction.
+  }
+>
