@@ -6,6 +6,7 @@
 @require: base/float
 
 module Ytabuleau : sig
+  val \sydiagram : [(int * int) list] math-cmd
   val \ydiagram : [int list] math-cmd
 end = struct
 
@@ -13,13 +14,15 @@ type tableau-cell =
   | NoYoungCell of math
   | YoungCell of math
 
-let empty-math = text-in-math MathOrd (fun ctx -> inline-nil)
-
+let len-to-str l = (Float.to-string (Length.to-float l)) ^ `pt`
 let display-line-draw-message (fromx,fromy) (tox,toy) = 
-  let len-to-str l = (Float.to-string (Length.to-float l)) ^ `pt` in
   display-message (`draw line from (` ^ 
     (len-to-str fromx) ^ `,` ^ (len-to-str fromy) ^ `) to (` ^ 
     (len-to-str tox) ^ `,` ^ (len-to-str toy) ^ `)`)
+
+let display-list-length varname lst =
+  display-message (`the length of ` ^ varname ^ ` is ` ^ (Int.to-string (List.length lst)))
+
 
 % ある行と次の行の（または列の）リストを渡すとその間の線を引く場所を返す
 % 戻り値は[(0,1); (2,4);]みたいなリスト．（これは一番目の箱と，3,4番目の箱のところに線を引くという意味．）
@@ -59,30 +62,44 @@ let get-line-pos lst1 lst2 =
       %let () = display-message (`nra = ` ^ (Int.to-string (List.length (remove-last a))) ^ `, nrb = ` ^ (Int.to-string (List.length (remove-last b)))) in
 
       let prev = aux preva prevb in
-      if add then prev
-      else
+      if add then
         match List.last prev with
         | None -> [(n - 1,n)]
         | Some((a,b)) -> (
           if b == n - 1 then List.append (remove-last prev) [(a,n)]
           else List.append prev [(a,n)]
         )
+      else
+        prev
   in
   aux lst1 lst2
 
 let draw-tableau ctx lst =
   let line-color = Color.black in
-  let line-width = 1pt in
-  let padding = 5pt in
-  let pds = (padding,padding,padding,padding) in
+  let line-width = 0.5pt in
+  let cell-size = 15pt in
   let cell-lst = List.map (List.map (fun c -> (
-    NormalCell(pds,(embed-math ctx (
+    let ib = embed-math ctx (
       match c with 
       | NoYoungCell(m) -> m
       | YoungCell(m) -> m
-    )))
+    ) in
+    let (w,h,d) = get-natural-metrics ib in
+    let yp = (cell-size -'w) *' 0.5 in
+    let tp = (cell-size -' h -' d) *' 0.5 in
+    NormalCell((yp,yp,tp,tp),ib)
+    %NormalCell((0pt,0pt,0pt,0pt),ib)
   ))) lst in
   let draw-lines xlst ylst =
+    let dump-xylst s l =
+      display-message (s ^ (
+        List.fold-left (fun ss l -> (
+          ss ^ `, ` ^ (len-to-str l)
+        )
+      ) ` ` l ))
+    in
+    let () = dump-xylst `xst = ` xlst in
+    let () = dump-xylst `yst = ` ylst in
     % 横方向の描画
     let-rec h-lines xlst ylst lst prevline =
       let curline = 
@@ -98,6 +115,11 @@ let draw-tableau ctx lst =
         | Some(y) -> y
       in
       let line-pos = get-line-pos prevline curline in
+      let () = display-message (`line-pos = ` ^
+        List.fold-left (fun s (a,b) -> (
+          s ^ ` ::: (` ^ (Int.to-string a) ^ `, ` ^ (Int.to-string b)  ^ `)`
+        )) ` ` line-pos
+      ) in
       let gr = List.fold-left (fun grlst (lst,len) -> (
         let xst = 
           match List.nth lst xlst with
@@ -117,7 +139,7 @@ let draw-tableau ctx lst =
         in
         let () = display-line-draw-message (xst,cury) (xen,cury) in
         List.append grlst [(stroke line-width line-color (
-            start-path (xst,cury) |> line-to (xen,cury) |> terminate-path
+            start-path (xst -' (line-width *' 0.5),cury) |> line-to (xen +' (line-width *' 0.5),cury) |> terminate-path
           ))]
       )) [] line-pos in
       match List.tail lst with
@@ -132,16 +154,17 @@ let draw-tableau ctx lst =
       )
     in
     
+    %let () = display-message `draw horizontal lines` in
     let h-gr = h-lines xlst ylst lst [] in
 
     let v-line xlst ya yb line =
       let-rec aux xl cells prevcell =
         let (curcell,nextcells,next) =
           match cells with
-          | [] -> (NoYoungCell(empty-math),[],false)
+          | [] -> (NoYoungCell(${}),[],false)
           | c :: n -> (c,n,true)
         in
-        let (curx,nextx) = match xlst with
+        let (curx,nextx) = match xl with
           | [] -> (
             let () = abort-with-message `xlst in v-line, draw-lines (Ytabuleau) is empty, it should be a bug` in
             (0pt,[])
@@ -164,7 +187,7 @@ let draw-tableau ctx lst =
         if next then List.append gr (aux nextx nextcells curcell) 
         else gr
       in
-      aux xlst line (NoYoungCell(empty-math))
+      aux xlst line (NoYoungCell(${}))
     in
 
     let-rec v-lines xlst ylst lst prevy =
@@ -179,9 +202,11 @@ let draw-tableau ctx lst =
           )
           | y :: r -> (y,r)
         in
+
         List.append (v-line xlst prevy cury l) (v-lines xlst ry rl cury)
       )
     in
+    %let () = display-message `draw vertical lines` in
     let v-gr = 
       match ylst with
       | [] -> []
@@ -192,7 +217,14 @@ let draw-tableau ctx lst =
   tabular cell-lst draw-lines
 
 let-math \ydiagram lst =
-  let clst = List.map (fun n -> List.repeat n (YoungCell(empty-math))) lst in
+  let clst = List.map (fun n -> List.repeat n (YoungCell(${}))) lst in
+  text-in-math MathOrd (fun ctx -> draw-tableau ctx clst)
+
+let-math \sydiagram lst =
+  let clst = List.map (fun (a,b) -> List.append
+    (List.repeat a (NoYoungCell(${})))
+    (List.repeat b (YoungCell(${})))
+  ) lst in
   text-in-math MathOrd (fun ctx -> draw-tableau ctx clst)
 
 end
